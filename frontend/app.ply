@@ -9,50 +9,68 @@ import tempfile
 import os
 
 st.set_page_config(page_title="📘 AI Tutor", layout="wide")
-st.title("📘 AI Tutor: Chat With Your Class Notes")
+st.title("📚 AI Tutor - Multi-Course Mode")
 
-# Initialize session state
-if "chain" not in st.session_state:
-    st.session_state.chain = None
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+# ---------------------- Session State Setup ----------------------
+if "courses" not in st.session_state:
+    st.session_state.courses = {}
 
-# Upload PDF
-uploaded_file = st.file_uploader("Upload a class PDF to train your AI tutor", type=["pdf"])
+if "current_course" not in st.session_state:
+    st.session_state.current_course = None
 
-if uploaded_file:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-        tmp_file.write(uploaded_file.read())
-        tmp_path = tmp_file.name
+# ---------------------- Course Selection ----------------------
+course_names = list(st.session_state.courses.keys())
+selected_course = st.selectbox("Select a course", course_names + ["➕ Create new course"])
 
-    st.success("✅ PDF uploaded. Preparing your tutor...")
+if selected_course == "➕ Create new course":
+    new_course_name = st.text_input("Enter new course name")
+    if st.button("Create Course") and new_course_name:
+        st.session_state.current_course = new_course_name
+        st.session_state.courses[new_course_name] = {
+            "chain": None,
+            "chat_history": []
+        }
+        st.experimental_rerun()
+else:
+    st.session_state.current_course = selected_course
 
-    # Load PDF, split, embed, create vectorstore
-    loader = UnstructuredPDFLoader(tmp_path)
-    docs = loader.load()
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    chunks = splitter.split_documents(docs)
-    embeddings = OpenAIEmbeddings()
-    vectorstore = FAISS.from_documents(chunks, embeddings)
+course = st.session_state.courses.get(st.session_state.current_course)
 
-    # Create AI chat chain
-    llm = ChatOpenAI(model_name="gpt-4", temperature=0)
-    st.session_state.chain = ConversationalRetrievalChain.from_llm(
-        llm=llm,
-        retriever=vectorstore.as_retriever()
-    )
-    st.success("🎓 Your AI Tutor is ready!")
+# ---------------------- Upload & Train PDF ----------------------
+if course:
+    st.header(f"📘 Course: {st.session_state.current_course}")
+    if not course["chain"]:
+        uploaded_file = st.file_uploader("Upload a class PDF", type=["pdf"])
+        if uploaded_file:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                tmp_file.write(uploaded_file.read())
+                tmp_path = tmp_file.name
 
-# Chat Interface
-if st.session_state.chain:
-    question = st.text_input("Ask a question about the course material:")
-    if question:
-        result = st.session_state.chain({
-            "question": question,
-            "chat_history": st.session_state.chat_history
-        })
-        st.session_state.chat_history.append((question, result["answer"]))
-    
-    for q, a in st.session_state.chat_history:
-        st.markdown(f"**You:** {q}")
-        st.markdown(f"**Tutor:** {a}")
+            st.success("✅ PDF uploaded. Preparing tutor...")
+
+            loader = UnstructuredPDFLoader(tmp_path)
+            docs = loader.load()
+            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+            chunks = splitter.split_documents(docs)
+            embeddings = OpenAIEmbeddings()
+            vectorstore = FAISS.from_documents(chunks, embeddings)
+            llm = ChatOpenAI(model_name="gpt-4", temperature=0)
+
+            course["chain"] = ConversationalRetrievalChain.from_llm(
+                llm=llm,
+                retriever=vectorstore.as_retriever()
+            )
+            st.success("🎓 Tutor is ready!")
+    else:
+        st.subheader("💬 Chat With Your Tutor")
+        query = st.text_input("Ask a question:")
+        if query:
+            result = course["chain"]({
+                "question": query,
+                "chat_history": course["chat_history"]
+            })
+            course["chat_history"].append((query, result["answer"]))
+
+        for q, a in course["chat_history"]:
+            st.markdown(f"**You:** {q}")
+            st.markdown(f"**Tutor:** {a}")
