@@ -50,18 +50,65 @@ if course:
 
             loader = UnstructuredPDFLoader(tmp_path)
             docs = loader.load()
-            splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-            chunks = splitter.split_documents(docs)
-            embeddings = OpenAIEmbeddings()
-            vectorstore = FAISS.from_documents(chunks, embeddings)
-            llm = ChatOpenAI(model_name="gpt-4", temperature=0)
+splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+chunks = splitter.split_documents(docs)
+embeddings = OpenAIEmbeddings()
+vectorstore = FAISS.from_documents(chunks, embeddings)
+llm = ChatOpenAI(model_name="gpt-4", temperature=0)
 
-            course["chain"] = ConversationalRetrievalChain.from_llm(
-                llm=llm,
-                retriever=vectorstore.as_retriever()
-            )
-            st.success("🎓 Tutor is ready!")
+# Create the conversational chain
+course["chain"] = ConversationalRetrievalChain.from_llm(
+    llm=llm,
+    retriever=vectorstore.as_retriever()
+)
+
+# Extract full text for summary & quiz generation
+full_text = "\n\n".join([doc.page_content for doc in docs])[:6000]  # limit tokens
+
+# Summary
+with st.spinner("🔍 Generating summary..."):
+    summary_prompt = "Summarize this document for a student in 5 bullet points."
+    summary_llm = ChatOpenAI(model_name="gpt-4", temperature=0)
+    summary = summary_llm.predict(f"{summary_prompt}\n\n{full_text}")
+    course["summary"] = summary
+
+# Quiz
+with st.spinner("🧠 Generating quiz questions..."):
+    quiz_prompt = "Write 5 quiz questions (with answers) based on this document:"
+    quiz = summary_llm.predict(f"{quiz_prompt}\n\n{full_text}")
+    course["quiz"] = quiz
+
+# Glossary
+with st.spinner("📚 Extracting key terms..."):
+    glossary_prompt = "List 5 key terms or concepts from this document with short definitions:"
+    glossary = summary_llm.predict(f"{glossary_prompt}\n\n{full_text}")
+    course["glossary"] = glossary
+
+st.success("🎓 Tutor, summary, quiz, and glossary ready!")
     else:
+if "summary" in course:
+    st.subheader("📝 Course Summary")
+    st.markdown(course["summary"])
+if "summary" in course:
+    st.subheader("📝 Course Summary")
+    st.markdown(course["summary"])
+    if st.button("🔄 Regenerate Summary"):
+        with st.spinner("Regenerating summary..."):
+            full_text = "\n\n".join([doc.page_content for doc in docs])[:6000]
+            summary_prompt = "Summarize this document for a student in 5 bullet points."
+            summary = ChatOpenAI(model_name="gpt-4", temperature=0).predict(
+                f"{summary_prompt}\n\n{full_text}"
+            )
+            course["summary"] = summary
+        st.experimental_rerun()
+
+if "quiz" in course:
+    st.subheader("❓ Practice Quiz")
+    st.markdown(course["quiz"])
+
+if "glossary" in course:
+    st.subheader("📚 Key Terms")
+    st.markdown(course["glossary"])
         st.subheader("💬 Chat With Your Tutor")
         query = st.text_input("Ask a question:")
         if query:
